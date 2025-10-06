@@ -5,7 +5,7 @@
 <title>Green Bond Game</title>
 <style>
 body { font-family: Arial; background-color:#e0f7fa; }
-#game { display:none; }
+#game, #hostPanel { display:none; }
 .sector { margin:5px 0; }
 .locked { opacity:0.5; }
 </style>
@@ -15,12 +15,14 @@ body { font-family: Arial; background-color:#e0f7fa; }
 <div id="lobby">
     <h2>Green Bond Game Lobby</h2>
     <input id="nameInput" placeholder="Enter your name">
-    <input id="roomInput" placeholder="Enter room code">
+    <button id="generateCodeBtn">Generate Room Code (Host Only)</button>
+    <span id="roomCodeDisplay"></span>
+    <input id="roomInput" placeholder="Enter Room Code">
     <button id="joinBtn">Join Room</button>
     <div id="playerList"></div>
 </div>
 
-<div id="hostPanel" style="display:none;">
+<div id="hostPanel">
     <h3>Host Controls</h3>
     <button id="startBtn">Start Game</button>
     <div>
@@ -46,30 +48,68 @@ body { font-family: Arial; background-color:#e0f7fa; }
 <script src="/socket.io/socket.io.js"></script>
 <script>
 const socket = io();
-let role, sectorsUnlocked=3;
+let role, sectorsUnlocked=3, isHost=false;
 const sectors = ["Railways Electrification","Expressways","Rewa Ultra Mega Solar Park","Wind Energy Farms","EV Charging Infrastructure","Urban Metro Expansion","Waste-to-Energy Plants","Hydro Power Dams","Coal Power Plants","Oil & Gas Pipelines","Real Estate Development","Water Purification"];
 
+// Generate Room Code
+document.getElementById('generateCodeBtn').onclick = () => {
+    const code = Math.random().toString(36).substring(2,8).toUpperCase();
+    document.getElementById('roomCodeDisplay').innerText = code;
+    document.getElementById('roomInput').value = code;
+};
+
+// Join Room
 document.getElementById('joinBtn').onclick = () => {
     const name = document.getElementById('nameInput').value;
     const roomCode = document.getElementById('roomInput').value;
     socket.emit('joinRoom',{name,roomCode});
 };
 
-socket.on('updatePlayers', list => {
-    document.getElementById('playerList').innerHTML = "<b>Players:</b> "+list.join(", ");
-});
-
-socket.on('roleAssignment',(r,sUnlocked)=>{
-    role=r; sectorsUnlocked=sUnlocked;
+socket.on('roleAssignment',(r,sUnlocked,hostStatus)=>{
+    role=r; sectorsUnlocked=sUnlocked; isHost=hostStatus;
     if(role==='impostor') alert("You are the Green Impostor! Send tips to sabotage.");
-    if(socket.id === io.id) role==='host'; // host logic handled separately
+    if(isHost) document.getElementById('hostPanel').style.display='block';
 });
 
+socket.on('updatePlayers', list=>{
+    document.getElementById('playerList').innerHTML="<b>Players:</b> "+list.join(", ");
+});
+
+// Host actions
+document.getElementById('startBtn').onclick = ()=> {
+    socket.emit('startGame',document.getElementById('roomInput').value);
+};
+
+document.querySelectorAll('.newsBtn').forEach(btn=>{
+    btn.onclick = ()=>socket.emit('flashNews',{
+        roomCode:document.getElementById('roomInput').value,
+        sector:btn.dataset.sector,
+        message:btn.dataset.msg
+    });
+});
+
+document.getElementById('unlockBtn').onclick = ()=>{
+    socket.emit('unlockSectors',{roomCode:document.getElementById('roomInput').value, newUnlock:12});
+};
+
+document.getElementById('endBtn').onclick = ()=>{
+    socket.emit('endGame',document.getElementById('roomInput').value);
+};
+
+// Game events
 socket.on('gameStarted', sUnlocked=>{
     sectorsUnlocked=sUnlocked;
     document.getElementById('lobby').style.display='none';
-    if(role==='host') document.getElementById('hostPanel').style.display='block';
-    else document.getElementById('game').style.display='block';
+    document.getElementById('game').style.display='block';
+    renderSectors();
+});
+
+socket.on('newsFlashed', ({sector,message})=>{
+    document.getElementById('newsArea').innerHTML=`<b>News on ${sector}:</b> ${message}`;
+});
+
+socket.on('sectorsUnlocked', newUnlock=>{
+    sectorsUnlocked=newUnlock;
     renderSectors();
 });
 
@@ -84,6 +124,7 @@ function renderSectors(){
     });
 }
 
+// Submit investments
 document.getElementById('submitInv').onclick=()=>{
     const investments={};
     document.querySelectorAll('.invInput').forEach(input=>{
@@ -92,30 +133,9 @@ document.getElementById('submitInv').onclick=()=>{
     socket.emit('submitInvestment',{roomCode:document.getElementById('roomInput').value, investments});
 };
 
-document.querySelectorAll('.newsBtn').forEach(btn=>{
-    btn.onclick=()=>socket.emit('flashNews',{roomCode:document.getElementById('roomInput').value, sector:btn.dataset.sector, message:btn.dataset.msg});
-});
-
-socket.on('newsFlashed', ({sector,message})=>{
-    const area = document.getElementById('newsArea');
-    area.innerHTML=`<b>News on ${sector}:</b> ${message}`;
-});
-
-document.getElementById('unlockBtn').onclick=()=>{
-    socket.emit('unlockSectors',{roomCode:document.getElementById('roomInput').value, newUnlock:12});
-};
-
-socket.on('sectorsUnlocked', newUnlock=>{
-    sectorsUnlocked=newUnlock;
-    renderSectors();
-});
-
-document.getElementById('endBtn').onclick=()=>{
-    socket.emit('endGame',document.getElementById('roomInput').value);
-};
-
+// End game
 socket.on('gameEnded', ({winner,impostorId,scores})=>{
-    alert(`Game Over! Winner: ${winner.name}\nGreen Impostor ID: ${impostorId}`);
+    alert(`Game Over!\nWinner: ${winner.name}\nGreen Impostor ID: ${impostorId}`);
     console.table(scores);
 });
 </script>
